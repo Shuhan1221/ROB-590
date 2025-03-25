@@ -93,8 +93,9 @@ def length_to_position_single(l, rigid_len, r):
     # Final position = flexible arc end + rigid extension along computed direction
     end_position = displacement + direction * rigid_len
     return end_position
+  
 
-def rotmat_to_euler(R):
+def rotmat_to_euler(l,r):
     """
     Convert a rotation matrix R (3x3) to Euler angles (roll, pitch, yaw)
     using the ZYX convention.
@@ -105,19 +106,37 @@ def rotmat_to_euler(R):
     Returns:
       euler : numpy array [roll, pitch, yaw] (in radians)
     """
-    if abs(R[2,0]) < 1:
-        pitch = -np.arcsin(R[2,0])
-        cos_pitch = np.cos(pitch)
-        roll = np.arctan2(R[2,1] / cos_pitch, R[2,2] / cos_pitch)
-        yaw = np.arctan2(R[1,0] / cos_pitch, R[0,0] / cos_pitch)
-    else:
-        yaw = 0
-        if R[2,0] <= -1:
-            pitch = np.pi/2
-            roll = np.arctan2(R[0,1], R[0,2])
-        else:
-            pitch = -np.pi/2
-            roll = np.arctan2(-R[0,1], -R[0,2])
+    
+    phi = get_phi(l[0], l[1], l[2])
+    beta = get_beta(l[0], l[1], l[2], r)
+    
+    a = np.cos(beta) * np.cos(phi)**2 + np.sin(phi)**2
+    b = (-1 + np.cos(beta)) * np.cos(phi) * np.sin(phi)
+    c = np.cos(phi) * np.sin(beta)
+    d = np.sin(beta) * np.sin(phi)
+    e = np.cos(beta)
+    f = np.cos(beta) * np.sin(phi)**2 + np.cos(phi)**2
+    
+    R = np.array([[a, b, c], [b, f, d], [-c, -d, e]])
+    
+    pitch = np.arctan2(-R[2,0], np.sqrt(R[0,0]**2 + R[1,0]**2))
+    # cos_pitch = np.cos(pitch)
+    roll = np.arctan2(R[2,1],R[2,2])
+    yaw = np.arctan2(R[1,0],R[0,0])
+    
+    # if abs(R[2,0]) < 1:
+    #     pitch = -np.arctan2(R[2,0], np.sqrt(R[2,1]**2 + R[2,2]**2))
+    #     # cos_pitch = np.cos(pitch)
+    #     roll = np.arctan2(R[2,1],R[2,2])
+    #     yaw = np.arctan2(R[1,0],R[0,0])
+    # else:
+    #     yaw = 0
+    #     if R[2,0] <= -1:
+    #         pitch = np.pi/2
+    #         roll = np.arctan2(R[0,1], R[0,2])
+    #     else:
+    #         pitch = -np.pi/2
+    #         roll = np.arctan2(-R[0,1], -R[0,2])
     return np.array([roll, pitch, yaw])
 
 def euler_to_rotmat(roll, pitch, yaw):
@@ -139,7 +158,7 @@ def euler_to_rotmat(roll, pitch, yaw):
     Rx = np.array([[1, 0, 0],
                    [0, np.cos(roll), -np.sin(roll)],
                    [0, np.sin(roll),  np.cos(roll)]])
-    return Rz @ Ry @ Rx
+    return Rx @ Ry @ Rz
   
 def arc_curve(l, r, num_points=100):
     """
@@ -170,7 +189,7 @@ def arc_curve(l, r, num_points=100):
 
 # ---------------- EKF Functions ----------------
 
-def f(mu_prev, u, rigid_len, r):
+def f(u, rigid_len, r):
     """
     EKF Prediction function: mu_pred = f(mu_prev, u)
     
@@ -188,7 +207,8 @@ def f(mu_prev, u, rigid_len, r):
       mu_pred   : numpy array, predicted state vector
     """
     pos = length_to_position_single(u, rigid_len, r)
-    return np.hstack((pos, mu_prev[3:6]))
+    direction = rotmat_to_euler(u,r)
+    return np.hstack((pos,direction ))
 
 def h(mu):
     """
@@ -224,7 +244,7 @@ def ekf_update(mu_prev, Sigma_prev, u, z, Q, R, rigid_len, r):
       Sigma_new : numpy array, updated state covariance matrix
     """
     # ----- Prediction Step -----
-    mu_pred = f(mu_prev, u, rigid_len, r)
+    mu_pred = f(u, rigid_len, r)
     
     # Jacobian of f with respect to mu_prev.
     # Since [x,y,z] are completely determined by u (not mu_prev), we set that block to zeros.
@@ -254,127 +274,6 @@ def ekf_update(mu_prev, Sigma_prev, u, z, Q, R, rigid_len, r):
 
 # ---------------- Visualization Functions ----------------
 
-# def plot_pcc_arc(u, rigid_len, r):
-#     """
-#     Visualize the continuum robot segment as an arc (flexible portion) plus its rigid extension.
-    
-#     Parameters:
-#       u         : numpy array, control input [l1, l2, l3]
-#       rigid_len : float, length of the rigid extension
-#       r         : float, PCC model's radius parameter
-#     """
-#     # Compute the flexible arc points
-#     arc_pts = arc_curve(u, r, num_points=100)
-    
-#     # Get the full end-effector position (including rigid extension)
-#     end_pos = length_to_position_single(u, rigid_len, r)
-    
-#     # Compute the orientation direction from the PCC model (same as in length_to_position_single)
-#     phi = get_phi(u[0], u[1], u[2])
-#     beta = get_beta(u[0], u[1], u[2], r)
-#     rotation = compute_rotation_matrix(phi, beta)
-#     direction = rotation @ np.array([0, 0, 1])
-    
-#     # The flexible arc end is the last point in arc_pts
-#     flex_end = arc_pts[-1, :]
-    
-#     # Generate points for the rigid extension as a straight line
-#     t_vals = np.linspace(0, 1, 20)
-#     rigid_pts = np.array([flex_end + t * direction * rigid_len for t in t_vals])
-    
-#     # Combine all points for full plot (flexible arc followed by rigid extension)
-#     full_pts = np.vstack((arc_pts, rigid_pts))
-    
-#     # # Plot in 3D
-#     fig = plt.figure(figsize=(8, 6))
-#     ax = fig.add_subplot(111, projection='3d')
-    
-#     # Plot the full trajectory of the continuum segment
-#     ax.plot(full_pts[:,0], full_pts[:,1], full_pts[:,2], 'b-', lw=2, label="Continuum Trajectory")
-    
-#     # Mark the base, the flexible arc end, and the final end-effector position
-#     ax.scatter(0, 0, 0, color='green', s=50, label="Base")
-#     ax.scatter(flex_end[0], flex_end[1], flex_end[2], color='orange', s=50, label="Arc End")
-#     ax.scatter(end_pos[0], end_pos[1], end_pos[2], color='red', s=50, label="End-Effector")
-    
-#     ax.set_xlabel("X")
-#     ax.set_ylabel("Y")
-#     ax.set_zlabel("Z")
-#     ax.set_title("PCC Continuum Robot Trajectory")
-#     ax.legend()
-#     plt.show()
-    
-# def plot_orientation_comparison(u, rigid_len, r, z, mu_prev, Sigma_prev, Q, R, arrow_length=1):
-#     """
-#     Compute and plot the orientation (roll, pitch, yaw) from three sources:
-#       - PCC prediction (using forward kinematics f_layer1)
-#       - Raw sensor (IMU) measurement (z)
-#       - EKF corrected orientation (after ekf_update_layer1)
-    
-#     Arrows are drawn from the PCC-computed end-effector position.
-    
-#     Parameters:
-#       u            : numpy array, control input [l1, l2, l3]
-#       rigid_len    : float, rigid extension length
-#       r            : float, PCC model's radius parameter
-#       z            : numpy array (3,), sensor measurement [roll, pitch, yaw]
-#       mu_prev      : numpy array (6,), previous state [x, y, z, roll, pitch, yaw]
-#       Sigma_prev   : numpy array (6x6), previous state covariance
-#       Q            : numpy array (6x6), process noise covariance
-#       R            : numpy array (3x3), measurement noise covariance
-#       arrow_length : float, length for the orientation arrows (default=1)
-#     """
-#     # Compute PCC predicted state using forward kinematics (f_layer1 must be defined elsewhere)
-#     mu_pcc = f(mu_prev, u, rigid_len, r)
-#     pcc_orient = mu_pcc[3:6]
-    
-#     # Perform EKF update (ekf_update_layer1 must be defined elsewhere)
-#     mu_updated, Sigma_updated = ekf_update(mu_prev, Sigma_prev, u, z, Q, R, rigid_len, r)
-#     ekf_orient = mu_updated[3:6]
-    
-#     # Sensor measurement (raw IMU input)
-#     sensor_orient = z
-    
-#     # Convert each orientation (Euler angles) to a rotation matrix
-#     R_pcc = euler_to_rotmat(*pcc_orient)
-#     R_sensor = euler_to_rotmat(*sensor_orient)
-#     R_ekf = euler_to_rotmat(*ekf_orient)
-    
-#     # Use the third column (local z-axis) as the arrow direction for each case.
-#     arrow_pcc = R_pcc[:, 2]
-#     arrow_sensor = R_sensor[:, 2]
-#     arrow_ekf = R_ekf[:, 2]
-    
-#     # Use the end-effector position (from PCC prediction) as the base point for the arrows.
-#     base_position = mu_pcc[0:3]
-    
-#     # # Create a 3D plot and plot the arrows.
-#     fig = plt.figure(figsize=(10,8))
-#     ax = fig.add_subplot(111, projection='3d')
-    
-#     # Plot the base (end-effector position from PCC prediction)
-#     ax.scatter(base_position[0], base_position[1], base_position[2],
-#                color='black', s=50, label="PCC End-Effector Position")
-    
-#     # Plot arrows using quiver (x, y, z, u, v, w)
-#     ax.quiver(base_position[0], base_position[1], base_position[2],
-#               arrow_pcc[0], arrow_pcc[1], arrow_pcc[2],
-#               length=arrow_length, color='blue', label='PCC Orientation')
-    
-#     ax.quiver(base_position[0], base_position[1], base_position[2],
-#               arrow_sensor[0], arrow_sensor[1], arrow_sensor[2],
-#               length=arrow_length, color='green', label='IMU Measurement')
-    
-#     ax.quiver(base_position[0], base_position[1], base_position[2],
-#               arrow_ekf[0], arrow_ekf[1], arrow_ekf[2],
-#               length=arrow_length, color='red', label='EKF Corrected')
-    
-#     ax.set_xlabel("X")
-#     ax.set_ylabel("Y")
-#     ax.set_zlabel("Z")
-#     ax.set_title("3D Orientation Comparison using Arrows")
-#     ax.legend()
-#     plt.show()
 def plot_arc_orientation(u, rigid_len, r, z, mu_prev, Sigma_prev, Q, R, arrow_length=1):
     # Compute the flexible arc points
     arc_pts = arc_curve(u, r, num_points=100)
@@ -399,7 +298,7 @@ def plot_arc_orientation(u, rigid_len, r, z, mu_prev, Sigma_prev, Q, R, arrow_le
     full_pts = np.vstack((arc_pts, rigid_pts))
     
         # Compute PCC predicted state using forward kinematics (f_layer1 must be defined elsewhere)
-    mu_pcc = f(mu_prev, u, rigid_len, r)
+    mu_pcc = f(u, rigid_len, r)
     pcc_orient = mu_pcc[3:6]
     
     # Perform EKF update (ekf_update_layer1 must be defined elsewhere)
@@ -419,6 +318,7 @@ def plot_arc_orientation(u, rigid_len, r, z, mu_prev, Sigma_prev, Q, R, arrow_le
     arrow_sensor = R_sensor[:, 2]
     arrow_ekf = R_ekf[:, 2]
     
+    
     # Use the end-effector position (from PCC prediction) as the base point for the arrows.
     base_position = mu_pcc[0:3]
     
@@ -434,7 +334,7 @@ def plot_arc_orientation(u, rigid_len, r, z, mu_prev, Sigma_prev, Q, R, arrow_le
     # ax.scatter(flex_end[0], flex_end[1], flex_end[2], color='orange', s=50, label="Arc End")
     ax.scatter(end_pos[0], end_pos[1], end_pos[2], color='orange', s=50, label="End-Effector")
     
-    # # Plot the base (end-effector position from PCC prediction)
+    # Plot the base (end-effector position from PCC prediction)
     # ax.scatter(base_position[0], base_position[1], base_position[2],
     #            color='black', s=50, label="PCC End-Effector Position")
     
@@ -450,6 +350,7 @@ def plot_arc_orientation(u, rigid_len, r, z, mu_prev, Sigma_prev, Q, R, arrow_le
     ax.quiver(base_position[0], base_position[1], base_position[2],
               arrow_ekf[0], arrow_ekf[1], arrow_ekf[2],
               length=arrow_length, color='red', label='EKF Corrected')
+    
     
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
@@ -478,7 +379,7 @@ if __name__ == "__main__":
     r = 19         # Radius parameter for the PCC model.
     
     # Example measurement (sensor-measured orientation, in radians)
-    z_k = np.array([0.1, 0.05, 0.0])
+    z_k = np.array([0.1, 0.05, 0.2])
     
     # Perform one EKF update.
     mu_updated, Sigma_updated = ekf_update(mu_prev, Sigma_prev, u_k, z_k, Q, R, rigid_len, r)
