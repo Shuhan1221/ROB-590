@@ -20,3 +20,43 @@ This repository contains simulation and analysis scripts for soft-robot pipe cli
 Install via pip:
 ```bash
 pip install numpy matplotlib jupyter
+```
+
+## Usage
+
+### 1. Unconstrained Soft Robot Trajectory  
+Run the simulation without any environmental constraints:  
+```bash
+python newnewpiperobot.py
+```
+### 2. Volume-Rendered Tube Trajectory
+Visualize the robot with real volume as a cyan tube:
+```bash
+python oldpiperobot.py
+```
+
+### 3. Pipe-Constrained Trajectory
+Simulate the soft robot climbing inside a pipe with boundary constraints:
+```bash
+python piperobotinpipe.py
+```
+### 4. EKF-Based Correction
+Apply an Extended Kalman Filter to the raw trajectory for state and orientation correction:
+```bash
+python ekf_new.py
+```
+ 
+### 5. PCC Validation Notebook
+Launch the Jupyter notebook to verify the PCC assumption on three Kresling origami modules:
+```bash
+jupyter notebook test_pcc.ipynb
+```
+### 6. Roll-Pitch-Yaw to Curvature Angles (MATLAB)
+```bash
+rpy = [roll; pitch; yaw];
+l = segment_length;
+[theta, phi, T] = from_rpy_to_angles(rpy, l);
+```
+
+
+
